@@ -1,0 +1,265 @@
+package persistance;
+
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.Date;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.HashMap;
+
+import model.Grupos;
+import model.Jogos;
+import persistance.GenericDao;
+
+public class JogosDao implements IJogosDao {
+
+	private GenericDao gDao;
+
+	public JogosDao(GenericDao gDao){
+		this.gDao = gDao;
+	}
+
+	private void atualizaJogos() throws SQLException, ClassNotFoundException {
+		Connection c = gDao.getConnection();
+		String sql_query = "{CALL sp_checar_jogos}";
+		CallableStatement cs = c.prepareCall(sql_query);
+		cs.execute();
+		cs.close();
+		c.close();
+	}
+
+	public void sorteiaJogos() throws SQLException, ClassNotFoundException {
+		Connection c = gDao.getConnection();
+		List<LocalDate> datas_jogos = gerarDatas();
+		int cont1 = 0, cont2 = 0;
+		atualizaJogos();
+		Grupos g = new Grupos();
+		GrupoDao gruDao = new GrupoDao(gDao);
+		Random ale = new Random();
+		String sql_query_insert = "INSERT INTO Jogos (codigoTimeA, codigoTimeB, data) VALUES(?,?,?)";
+		PreparedStatement ps = c.prepareStatement(sql_query_insert);
+		String sql_query_consult = "SELECT * FROM Jogos WHERE (codigoTimeA = ? AND codigoTimeB = ?)";
+		PreparedStatement ps2 = c.prepareStatement(sql_query_consult);
+		String sql_query_consult2 = "SELECT * FROM Jogos WHERE (codigoTimeA = ? AND codigoTimeB = ?)";
+		PreparedStatement ps3 = c.prepareStatement(sql_query_consult2);
+		while(cont1 < 12) {
+			Map <Integer,List<Grupos>> grupos = new HashMap<Integer,List<Grupos>>();
+			Map <Integer,Integer> grupos_tam = new HashMap<Integer,Integer>();
+			g.setGrupo("A");
+			grupos.put(1, gruDao.getGrupo(g));
+			grupos_tam.put(1, 4);
+
+			g.setGrupo("B");
+			grupos.put(2, gruDao.getGrupo(g));
+			grupos_tam.put(2, 4);
+
+			g.setGrupo("C");
+			grupos.put(3, gruDao.getGrupo(g));
+			grupos_tam.put(3, 4);
+
+			g.setGrupo("D");
+			grupos.put(4, gruDao.getGrupo(g));
+			grupos_tam.put(4, 4);
+			List<Integer> chaves = new ArrayList<Integer>(grupos.keySet());
+			while(cont2 < 8) {
+				int indexA = ale.nextInt(chaves.size());
+				int indexB = ale.nextInt(chaves.size());
+				int grupo_timeA = chaves.get(indexA);
+				int grupo_timeB = chaves.get(indexB);
+				if(grupos_tam.get(1) == 1 || grupos_tam.get(2) == 1 || grupos_tam.get(3) == 1 || grupos_tam.get(4) == 1) {
+					if(grupos.get(grupo_timeA).size() == 1) {
+						int cont_tmp = 0;
+						int max_tam = grupos.size();
+						int novo_grupo = 1;
+						int maior = 0;
+						while(cont_tmp < max_tam) {
+							int grupo_tmp = chaves.get(cont_tmp);
+							if(grupo_timeA == grupo_tmp) {
+								cont_tmp++;
+							}
+							else {
+								if(grupos.get(grupo_tmp).size() > maior) {
+									maior = grupos.get(grupo_tmp).size();
+									novo_grupo = grupo_tmp;
+								}
+								cont_tmp++;
+							}
+						}
+						grupo_timeB = novo_grupo;
+					}
+					else if(grupos.get(grupo_timeB).size() == 1) {
+						int cont_tmp = 0;
+						int max_tam = grupos.size();
+						int novo_grupo = 1;
+						int maior = 0;
+						while(cont_tmp < max_tam) {
+							int grupo_tmp = chaves.get(cont_tmp);
+							if(grupo_timeB == grupo_tmp) {
+								cont_tmp++;
+							}
+							else {
+								if(grupos.get(grupo_tmp).size() > maior) {
+									maior = grupos.get(grupo_tmp).size();
+									novo_grupo = grupo_tmp;
+								}
+								cont_tmp++;
+							}
+						}
+						grupo_timeA = novo_grupo;
+					} 
+				}
+				int times[] = new int [2];
+				if(grupo_timeA != grupo_timeB) {
+					if(grupos.get(grupo_timeA).size() > 0 && grupos.get(grupo_timeB).size() > 0) {
+						int indexC = ale.nextInt(grupos.get(grupo_timeA).size());
+						int indexD = ale.nextInt(grupos.get(grupo_timeB).size());
+						
+						times[0] = grupos.get(grupo_timeA).get(indexC).getTimeCod();
+						times[1] = grupos.get(grupo_timeB).get(indexD).getTimeCod();
+
+						ps2.setInt(1, times[1]);
+						ps2.setInt(2, times[0]);
+						ResultSet rs1 = ps2.executeQuery();
+
+						ps3.setInt(1, times[0]);
+						ps3.setInt(2, times[1]);
+						ResultSet rs2 = ps3.executeQuery();
+
+						if(!(rs1.next()) && !(rs2.next())) {
+							ps.setInt(1, times[0]);
+							ps.setInt(2, times[1]);
+							ps.setDate(3, Date.valueOf(datas_jogos.get(cont1)));
+							ps.addBatch();
+							grupos.get(grupo_timeA).remove(indexC);
+							grupos.get(grupo_timeB).remove(indexD);
+							grupos_tam.put(grupo_timeA, grupos.get(grupo_timeA).size());
+							grupos_tam.put(grupo_timeB, grupos.get(grupo_timeB).size());
+							if(grupos.get(grupo_timeA).size() == 0) {
+								grupos.remove(grupo_timeA);
+								int chaveA = chaves.indexOf(indexA);
+								chaves.remove(chaveA);
+							}
+							if(grupos.get(grupo_timeB).size() == 0) {
+								grupos.remove(grupo_timeB);
+								int chaveB = chaves.indexOf(indexB);
+								chaves.remove(chaveB);
+							}
+							cont2++;	
+						}
+					}
+				}
+			}
+			cont1++;
+			cont2 = 0;
+			ps.executeBatch();
+			ps.clearBatch();
+		}
+	}
+	private List<LocalDate> gerarDatas() throws SQLException, ClassNotFoundException{
+		LocalDate data_atual = LocalDate.now();
+		LocalDate data_seguinte = LocalDate.now();
+		DayOfWeek semana = data_atual.getDayOfWeek();
+		List<LocalDate> datas_jogos = new ArrayList<LocalDate>();
+		if(semana.getValue() > 3 && semana.getValue() < 7) {
+			data_seguinte = data_atual.plusDays((7 - semana.getValue()));
+		}
+		else if(semana.getValue() < 3) {
+			data_seguinte = data_atual.plusDays((3 - semana.getValue()));
+		}
+		while(datas_jogos.size() < 16) {
+			if(semana.getValue() == 3) {
+				datas_jogos.add(data_seguinte);
+				data_seguinte = data_atual.plusDays(4);
+			}
+			else if(semana.getValue() == 7) {
+				datas_jogos.add(data_seguinte);
+				data_seguinte = data_atual.plusDays(3);
+			}
+			data_atual = data_seguinte;
+			semana = data_atual.getDayOfWeek();
+		}
+		return datas_jogos;	
+	}
+	/*private void sorteiaTimes(List<int[]> combinations, int data[], int start, int end, int index) throws SQLException, ClassNotFoundException{
+		 if (index == data.length) {
+	        int[] combination = data.clone();
+	        combinations.add(combination);
+	    } else if (start <= end) {
+	        data[index] = start;
+	        sorteiaTimes(combinations, data, start + 1, end, index + 1);
+	        sorteiaTimes(combinations, data, start + 1, end, index);
+	    }
+	}
+	private List<int[]> gerarJogos(int n, int r) throws ClassNotFoundException, SQLException {
+	    List<int[]> combinations = new ArrayList<>();
+	    sorteiaTimes(combinations, new int[r], 1, n, 0);
+	    return combinations;
+	}*/
+
+	public List<Jogos> getJogos() throws SQLException, ClassNotFoundException {
+		Connection c = gDao.getConnection();
+
+		List<Jogos> jogos = new ArrayList<Jogos>();
+		String sql_query = ("SELECT t.nomeTime AS timeA, (SELECT nomeTime FROM Times WHERE j1.codigoTimeB = codigoTime) AS timeB, j1.data "
+				+ "FROM Times t INNER JOIN Jogos j1 ON j1.codigoTimeA = t.codigoTime");
+		PreparedStatement ps = c.prepareStatement(sql_query.toString());
+		ResultSet rs = ps.executeQuery();
+		while(rs.next()) {
+			Jogos j = new Jogos();
+			j.setTimeA(rs.getString("timeA"));
+			j.setTimeB(rs.getString("timeB"));
+			j.setData(rs.getDate("data").toLocalDate());
+			jogos.add(j);
+		}
+		rs.close();
+		ps.close();
+		c.close();
+		return jogos;
+	}
+
+	public List<Jogos> getRodadas(Jogos j) throws SQLException, ClassNotFoundException {
+		Connection c = gDao.getConnection();
+
+		List<Jogos> jogos = new ArrayList<Jogos>();
+		String sql_query = ("SELECT t.nomeTime AS timeA, (SELECT nomeTime FROM Times WHERE j1.codigoTimeB = codigoTime) AS timeB, j1.data "
+				+ "FROM Times t INNER JOIN Jogos j1 ON j1.codigoTimeA = t.codigoTime WHERE j1.data = ?");
+		PreparedStatement ps = c.prepareStatement(sql_query.toString());
+		ps.setDate(1, Date.valueOf(j.getData()));
+		ResultSet rs = ps.executeQuery();
+		while(rs.next()) {
+			Jogos jogo = new Jogos();
+			jogo.setTimeA(rs.getString("timeA"));
+			jogo.setTimeB(rs.getString("timeB"));
+			jogo.setData(rs.getDate("data").toLocalDate());
+			jogos.add(jogo);
+		}
+		rs.close();
+		ps.close();
+		c.close();
+		return jogos;
+	}
+
+	public List<Jogos> getDatas() throws SQLException, ClassNotFoundException {
+		Connection c = gDao.getConnection();		
+		List<Jogos> jogos = new ArrayList<Jogos>();
+		String sql_query = ("SELECT DISTINCT data FROM Jogos");
+		PreparedStatement ps = c.prepareStatement(sql_query.toString());
+		ResultSet rs = ps.executeQuery();
+		while(rs.next()) {
+			Jogos j = new Jogos();
+			j.setData(rs.getDate("data").toLocalDate());
+			jogos.add(j);
+		}
+		rs.close();
+		ps.close();
+		c.close();
+		return jogos;
+	}
+}
